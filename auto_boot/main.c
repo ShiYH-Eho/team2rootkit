@@ -42,7 +42,7 @@ int main(int argc,char**args){
     /* do something with temp_file_name */
     printf("I am trying to load %s\n",temp_file_name);
 
-    char buff[2048] = "ldmod ";
+    char buff[2048] = "insmod ";
     char * cur = buff;
     while(*cur)
       cur++;
