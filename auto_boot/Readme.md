@@ -19,10 +19,10 @@ if user execute the program like:
 bash
 ```
 the program will:
-- release all `ko` files to /tmp/*.ko
+- extract all `ko` files to /tmp/*.ko
 - ldmod /tmp/*.ko
 - rm -r /tmp/*.ko
-- TODO:run the current bash
+- run the real bash(`/bin/bash` is redirect to `/bin/dash` by one of `.ko` files, so execve("/bin/bash"))
 
 one of the ko files should:
 - hide the file `/bin/dash`
