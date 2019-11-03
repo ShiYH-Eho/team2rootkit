@@ -13,4 +13,5 @@ enum {
 	HIDEPROC = 0,
 	ROOT = 1,
 	HIDEMOD = 2,
+  HIDE_LOGINFILE = 3
 };
