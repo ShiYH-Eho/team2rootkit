@@ -1,16 +1,11 @@
-TARGET = pshid
+TARGET = fs_ps_hide
 obj-m := ${TARGET}ko.o
 ${TARGET}ko-objs := ${TARGET}.o
-
-
-
-
 
 default:
 	${MAKE} modules \
 		--directory "/lib/modules/$(shell uname --release)/build" \
 		M="$(shell pwd)"
-
 
 clean:
 	${MAKE} clean \
