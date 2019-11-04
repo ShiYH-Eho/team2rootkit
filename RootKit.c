@@ -51,7 +51,7 @@ int fake_seq_show(struct seq_file *seq, void *v);
 
 //创建与删除一个/proc下面的项目
 struct proc_dir_entry *entry;
-//static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
  
 void
 proc_remove(struct proc_dir_entry *entry);
